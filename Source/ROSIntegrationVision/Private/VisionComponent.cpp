@@ -509,7 +509,6 @@ void UVisionComponent::ShowFlagsPostProcess(FEngineShowFlags &ShowFlags) const
 void UVisionComponent::ShowFlagsVertexColor(FEngineShowFlags &ShowFlags) const
 {
 	ShowFlagsLit(ShowFlags);
-	ApplyViewMode(VMI_Lit, true, ShowFlags);
 
 	// From MeshPaintEdMode.cpp:2942
 	ShowFlags.SetMaterials(false);
