@@ -68,12 +68,11 @@ private:
 	// The cameras for color, depth and objects;
 	USceneCaptureComponent2D *Color;
 	USceneCaptureComponent2D *Depth;
-	USceneCaptureComponent2D *Object;
 
 	UMaterialInstanceDynamic *MaterialDepthInstance;
   
-  TArray<FFloat16Color> ImageColor, ImageDepth, ImageObject;
-  TArray<uint8> DataColor, DataDepth, DataObject;
+  TArray<FFloat16Color> ImageColor, ImageDepth;
+  TArray<uint8> DataColor, DataDepth;
   TArray<FColor> ObjectColors;
   TMap<FString, uint32> ObjectToColor;
   uint32 ColorsUsed;
@@ -93,7 +92,6 @@ private:
   bool ColorAllObjects();
   void ProcessColor();
   void ProcessDepth();
-  void ProcessObject();
 
   // in must hold Width*Height*2(float) Bytes
   void convertDepth(const uint16_t *in, __m128 *out) const;

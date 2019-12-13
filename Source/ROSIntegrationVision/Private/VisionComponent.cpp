@@ -28,11 +28,11 @@ class ROSINTEGRATIONVISION_API UVisionComponent::PrivateData
 public:
 	TSharedPtr<PacketBuffer> Buffer;
 	// TCPServer Server;
-	std::mutex WaitColor, WaitDepth, WaitObject, WaitDone;
-	std::condition_variable CVColor, CVDepth, CVObject, CVDone;
-	std::thread ThreadColor, ThreadDepth, ThreadObject;
-	bool DoColor, DoDepth, DoObject;
-	bool DoneColor, DoneObject;
+	std::mutex WaitColor, WaitDepth, WaitDone;
+	std::condition_variable CVColor, CVDepth, CVDone;
+	std::thread ThreadColor, ThreadDepth;
+	bool DoColor, DoDepth;
+	bool DoneColor;
 };
 
 UVisionComponent::UVisionComponent() : 
@@ -70,14 +70,6 @@ ColorsUsed(0)
         Depth->TextureTarget = CreateDefaultSubobject<UTextureRenderTarget2D>(TEXT("DepthTarget"));
         Depth->TextureTarget->InitAutoFormat(Width, Height);
         Depth->FOVAngle = FieldOfView;
-
-        UE_LOG(LogTemp, Warning, TEXT("Creating object camera."))
-            Object = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("ObjectCapture"));
-        Object->SetupAttachment(RootComponent);
-        Object->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
-        Object->TextureTarget = CreateDefaultSubobject<UTextureRenderTarget2D>(TEXT("ObjectTarget"));
-        Object->TextureTarget->InitAutoFormat(Width, Height);
-        Object->FOVAngle = FieldOfView;
 
         UE_LOG(LogTemp, Warning, TEXT("Loading materials"))
             ConstructorHelpers::FObjectFinder<UMaterial> MaterialDepthFinder(TEXT("Material'/ROSIntegrationVision/SceneDepth.SceneDepth'"));
@@ -131,19 +123,16 @@ void UVisionComponent::BeginPlay()
     // Initializing buffers for reading images from the GPU
 	ImageColor.AddUninitialized(Width * Height);
 	ImageDepth.AddUninitialized(Width * Height);
-	ImageObject.AddUninitialized(Width * Height);
 
 	// Reinit renderer
 	Color->TextureTarget->InitAutoFormat(Width, Height);
 	Depth->TextureTarget->InitAutoFormat(Width, Height);
-	Object->TextureTarget->InitAutoFormat(Width, Height);
 
 	AspectRatio = Width / (float)Height;
 
 	// Setting flags for each camera
 	ShowFlagsLit(Color->ShowFlags);
 	ShowFlagsPostProcess(Depth->ShowFlags);
-	ShowFlagsVertexColor(Object->ShowFlags);
 
 	// Creating double buffer and setting the pointer of the server object
 	Priv->Buffer = TSharedPtr<PacketBuffer>(new PacketBuffer(Width, Height, FieldOfView));
@@ -152,16 +141,13 @@ void UVisionComponent::BeginPlay()
 	Paused = false;
 
 	Priv->DoColor = false;
-	Priv->DoObject = false;
 	Priv->DoDepth = false;
 
 	Priv->DoneColor = false;
-	Priv->DoneObject = false;
 
 	// Starting threads to process image data
 	Priv->ThreadColor = std::thread(&UVisionComponent::ProcessColor, this);
 	Priv->ThreadDepth = std::thread(&UVisionComponent::ProcessDepth, this);
-	Priv->ThreadObject = std::thread(&UVisionComponent::ProcessObject, this);
 
 	// Establish ROS communication
 	UROSIntegrationGameInstance* rosinst = Cast<UROSIntegrationGameInstance>(GetOwner()->GetGameInstance());
@@ -247,13 +233,6 @@ void UVisionComponent::TickComponent(float DeltaTime,
 	Priv->WaitColor.unlock();
 	Priv->DoColor = true;
 	Priv->CVColor.notify_one();
-
-	// Read object image and notify processing thread
-	Priv->WaitObject.lock();
-	ReadImage(Object->TextureTarget, ImageObject);
-	Priv->WaitObject.unlock();
-	Priv->DoObject = true;
-	Priv->CVObject.notify_one();
 
 	/* Read depth image and notify processing thread. Depth processing is called last,
 	 * because the color image processing thread take more time so they can already begin.
@@ -459,14 +438,11 @@ void UVisionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
     // Stopping processing threads
     Priv->DoColor = true;
     Priv->DoDepth = true;
-    Priv->DoObject = true;
     Priv->CVColor.notify_one();
     Priv->CVDepth.notify_one();
-    Priv->CVObject.notify_one();
 
     Priv->ThreadColor.join();
     Priv->ThreadDepth.join();
-    Priv->ThreadObject.join();
 }         
 
 void UVisionComponent::ShowFlagsBasicSetting(FEngineShowFlags &ShowFlags) const
@@ -740,28 +716,12 @@ void UVisionComponent::ProcessDepth()
 
 		// Wait for both other processing threads to be done.
 		std::unique_lock<std::mutex> WaitDoneLock(Priv->WaitDone);
-		Priv->CVDone.wait(WaitDoneLock, [this] {return Priv->DoneColor && Priv->DoneObject; });
+		Priv->CVDone.wait(WaitDoneLock, [this] {return Priv->DoneColor; });
 
 		Priv->DoneColor = false;
-		Priv->DoneObject = false;
 
 		// Complete Buffer
 		Priv->Buffer->DoneWriting();
-	}
-}
-
-void UVisionComponent::ProcessObject()
-{
-	while (true)
-	{
-		std::unique_lock<std::mutex> WaitLock(Priv->WaitObject);
-		Priv->CVObject.wait(WaitLock, [this] {return Priv->DoObject; });
-		Priv->DoObject = false;
-		if (!this->Running) break;
-		ToColorImage(ImageObject, Priv->Buffer->Object);
-
-		Priv->DoneObject = true;
-		Priv->CVDone.notify_one();
 	}
 }
 
