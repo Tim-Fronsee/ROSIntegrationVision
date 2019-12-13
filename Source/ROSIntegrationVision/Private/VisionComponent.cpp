@@ -29,10 +29,8 @@ public:
 	TSharedPtr<PacketBuffer> Buffer;
 	// TCPServer Server;
 	std::mutex WaitColor, WaitDepth, WaitDone;
-	std::condition_variable CVColor, CVDepth, CVDone;
+	std::condition_variable CVColor, CVDepth;
 	std::thread ThreadColor, ThreadDepth;
-	bool DoColor, DoDepth;
-	bool DoneColor;
 };
 
 UVisionComponent::UVisionComponent() : 
@@ -140,11 +138,6 @@ void UVisionComponent::BeginPlay()
 	Running = true;
 	Paused = false;
 
-	Priv->DoColor = false;
-	Priv->DoDepth = false;
-
-	Priv->DoneColor = false;
-
 	// Starting threads to process image data
 	Priv->ThreadColor = std::thread(&UVisionComponent::ProcessColor, this);
 	Priv->ThreadDepth = std::thread(&UVisionComponent::ProcessDepth, this);
@@ -226,24 +219,21 @@ void UVisionComponent::TickComponent(float DeltaTime,
 
 	// Start writing to buffer
 	Priv->Buffer->StartWriting(ObjectToColor, ObjectColors);
-
+        
 	// Read color image and notify processing thread
 	Priv->WaitColor.lock();
 	ReadImage(Color->TextureTarget, ImageColor);
 	Priv->WaitColor.unlock();
-	Priv->DoColor = true;
 	Priv->CVColor.notify_one();
-
-	/* Read depth image and notify processing thread. Depth processing is called last,
-	 * because the color image processing thread take more time so they can already begin.
-	 * The depth processing thread will wait for the others to be finished and then releases
-	 * the buffer.
-	 */
-	Priv->WaitDepth.lock();
-	ReadImage(Depth->TextureTarget, ImageDepth);
-	Priv->WaitDepth.unlock();
-	Priv->DoDepth = true;
-	Priv->CVDepth.notify_one();
+    
+    // Read depth image.
+    Priv->WaitDepth.lock();
+    ReadImage(Depth->TextureTarget, ImageDepth);
+    Priv->WaitDepth.unlock();
+    Priv->CVDepth.notify_one();
+    
+    // Close the buffer.
+    Priv->Buffer->DoneWriting();
 
 	Priv->Buffer->StartReading();
 	uint32_t xSize = Priv->Buffer->HeaderRead->Size;
@@ -436,8 +426,6 @@ void UVisionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Running = false;
 
     // Stopping processing threads
-    Priv->DoColor = true;
-    Priv->DoDepth = true;
     Priv->CVColor.notify_one();
     Priv->CVDepth.notify_one();
 
@@ -691,37 +679,23 @@ bool UVisionComponent::ColorAllObjects()
 
 void UVisionComponent::ProcessColor()
 {
-	while (true)
+	while (this->Running)
 	{
 		std::unique_lock<std::mutex> WaitLock(Priv->WaitColor);
-		Priv->CVColor.wait(WaitLock, [this] {return Priv->DoColor; });
-		Priv->DoColor = false;
-		if (!this->Running) break;
+		Priv->CVColor.wait(WaitLock);
 		ToColorImage(ImageColor, Priv->Buffer->Color);
-
-		Priv->DoneColor = true;
-		Priv->CVDone.notify_one();
+		Priv->CVColor.notify_one();
 	}
 }
 
 void UVisionComponent::ProcessDepth()
 {
-	while (true)
+	while (this->Running)
 	{
 		std::unique_lock<std::mutex> WaitLock(Priv->WaitDepth);
-		Priv->CVDepth.wait(WaitLock, [this] {return Priv->DoDepth; });
-		Priv->DoDepth = false;
-		if (!this->Running) break;
+		Priv->CVDepth.wait(WaitLock);
 		ToDepthImage(ImageDepth, Priv->Buffer->Depth);
-
-		// Wait for both other processing threads to be done.
-		std::unique_lock<std::mutex> WaitDoneLock(Priv->WaitDone);
-		Priv->CVDone.wait(WaitDoneLock, [this] {return Priv->DoneColor; });
-
-		Priv->DoneColor = false;
-
-		// Complete Buffer
-		Priv->Buffer->DoneWriting();
+        Priv->CVDepth.notify_one();
 	}
 }
 
