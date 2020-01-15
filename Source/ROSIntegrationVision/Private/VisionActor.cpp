@@ -6,7 +6,7 @@
 // Sets default values
 AVisionActor::AVisionActor() : AActor()
 {
-	UE_LOG(LogTemp, Warning, TEXT("VisionActor CTOR"));
+	UE_LOG(LogTemp, Verbose, TEXT("VisionActor CTOR"));
 
 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;

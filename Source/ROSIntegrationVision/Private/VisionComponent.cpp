@@ -51,7 +51,7 @@ ColorsUsed(0)
     auto owner = GetOwner();
     if (owner)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Creating color camera."));
+        UE_LOG(LogTemp, Verbose, TEXT("Creating color camera."));
         Color = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("ColorCapture"));
         Color->SetupAttachment(this);
         Color->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
@@ -59,7 +59,7 @@ ColorsUsed(0)
         Color->TextureTarget->InitAutoFormat(Width, Height);
         Color->FOVAngle = FieldOfView;
 
-        UE_LOG(LogTemp, Warning, TEXT("Creating depth camera."))
+        UE_LOG(LogTemp, Verbose, TEXT("Creating depth camera."))
             Depth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("DepthCapture"));
         Depth->SetupAttachment(this);
         Depth->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
@@ -67,7 +67,7 @@ ColorsUsed(0)
         Depth->TextureTarget->InitAutoFormat(Width, Height);
         Depth->FOVAngle = FieldOfView;
 
-        UE_LOG(LogTemp, Warning, TEXT("Loading materials"))
+        UE_LOG(LogTemp, Verbose, TEXT("Loading materials"))
             ConstructorHelpers::FObjectFinder<UMaterial> MaterialDepthFinder(TEXT("Material'/ROSIntegrationVision/SceneDepth.SceneDepth'"));
         if (MaterialDepthFinder.Object != nullptr)
         {
