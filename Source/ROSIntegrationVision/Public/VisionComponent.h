@@ -52,6 +52,11 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Vision Component")
 		UTopic * TFPublisher;
     
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+    FString ImageFrame = TEXT("/unreal_ros/image_frame");
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+    FString ImageOpticalFrame = TEXT("/unreal_ros/image_optical_frame");
+    
 protected:
   
   virtual void InitializeComponent() override;
