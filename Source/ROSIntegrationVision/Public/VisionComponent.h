@@ -36,6 +36,12 @@ public:
     bool UseEngineFramerate; 
   UPROPERTY(EditAnywhere, Category = "Vision Component")
     int32 ServerPort;
+    
+  // The cameras for color, depth and objects;
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+	  USceneCaptureComponent2D * Color;
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+  	USceneCaptureComponent2D * Depth;
   
 protected:
   
@@ -65,10 +71,6 @@ private:
 	class PrivateData;
 	PrivateData *Priv;
 
-	// The cameras for color, depth and objects;
-	USceneCaptureComponent2D *Color;
-	USceneCaptureComponent2D *Depth;
-
 	UMaterialInstanceDynamic *MaterialDepthInstance;
   
   TArray<FFloat16Color> ImageColor, ImageDepth;
@@ -80,7 +82,6 @@ private:
   
   void ShowFlagsBasicSetting(FEngineShowFlags &ShowFlags) const;
   void ShowFlagsLit(FEngineShowFlags &ShowFlags) const;
-  void ShowFlagsPostProcess(FEngineShowFlags &ShowFlags) const;
   void ShowFlagsVertexColor(FEngineShowFlags &ShowFlags) const;
   void ReadImage(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const;
   void ReadImageCompressed(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const;

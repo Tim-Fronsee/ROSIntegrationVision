@@ -51,7 +51,6 @@ ColorsUsed(0)
     auto owner = GetOwner();
     if (owner)
     {
-        UE_LOG(LogTemp, Verbose, TEXT("Creating color camera."));
         Color = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("ColorCapture"));
         Color->SetupAttachment(this);
         Color->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
@@ -59,16 +58,15 @@ ColorsUsed(0)
         Color->TextureTarget->InitAutoFormat(Width, Height);
         Color->FOVAngle = FieldOfView;
 
-        UE_LOG(LogTemp, Verbose, TEXT("Creating depth camera."))
-            Depth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("DepthCapture"));
+        Depth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("DepthCapture"));
         Depth->SetupAttachment(this);
-        Depth->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
+        Depth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
         Depth->TextureTarget = CreateDefaultSubobject<UTextureRenderTarget2D>(TEXT("DepthTarget"));
+        Depth->TextureTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
         Depth->TextureTarget->InitAutoFormat(Width, Height);
         Depth->FOVAngle = FieldOfView;
 
-        UE_LOG(LogTemp, Verbose, TEXT("Loading materials"))
-            ConstructorHelpers::FObjectFinder<UMaterial> MaterialDepthFinder(TEXT("Material'/ROSIntegrationVision/SceneDepth.SceneDepth'"));
+        ConstructorHelpers::FObjectFinder<UMaterial> MaterialDepthFinder(TEXT("Material'/ROSIntegrationVision/SceneDepth.SceneDepth'"));
         if (MaterialDepthFinder.Object != nullptr)
         {
             MaterialDepthInstance = UMaterialInstanceDynamic::Create(MaterialDepthFinder.Object, Depth);
@@ -128,7 +126,6 @@ void UVisionComponent::BeginPlay()
 
 	// Setting flags for each camera
 	ShowFlagsLit(Color->ShowFlags);
-	ShowFlagsPostProcess(Depth->ShowFlags);
 
 	// Creating double buffer and setting the pointer of the server object
 	Priv->Buffer = TSharedPtr<PacketBuffer>(new PacketBuffer(Width, Height, FieldOfView));
@@ -462,17 +459,6 @@ void UVisionComponent::ShowFlagsLit(FEngineShowFlags &ShowFlags) const
 	ShowFlags.SetEyeAdaptation(false); // Eye adaption is a slow temporal procedure, not useful for image capture
 }
 
-void UVisionComponent::ShowFlagsPostProcess(FEngineShowFlags &ShowFlags) const
-{
-	ShowFlagsBasicSetting(ShowFlags);
-	ShowFlags.SetBSP(true);
-	ShowFlags.SetBSPTriangles(true);
-	ShowFlags.SetPostProcessing(true);
-	ShowFlags.SetPostProcessMaterial(true);
-
-	GVertexColorViewMode = EVertexColorViewMode::Color;
-}
-
 void UVisionComponent::ShowFlagsVertexColor(FEngineShowFlags &ShowFlags) const
 {
 	ShowFlagsLit(ShowFlags);
@@ -708,6 +694,8 @@ void UVisionComponent::convertDepth(const uint16_t *in, __m128 *out) const
 	const size_t size = (Width * Height) / 4;
 	for (size_t i = 0; i < size; ++i, in += 4, ++out)
 	{
-		*out = _mm_cvtph_ps(_mm_set_epi16(0, 0, 0, 0, *(in + 3), *(in + 2), *(in + 1), *(in + 0)));
+    // Divide by 100 here in order to convert UU (cm) into ROS units (m)
+		*out = _mm_cvtph_ps(_mm_set_epi16(
+        0, 0, 0, 0, *(in + 3), *(in + 2), *(in + 1), *(in + 0))) / 100;
 	}
 }       
