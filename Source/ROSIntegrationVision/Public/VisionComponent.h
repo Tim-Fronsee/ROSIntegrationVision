@@ -52,9 +52,9 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Vision Component")
 		UTopic * TFPublisher;
     
-  UPROPERTY(EditAnywhere, Category = "Vision Component")
+  UPROPERTY(BlueprintReadWrite, Category = "Vision Component")
     FString ImageFrame = TEXT("/unreal_ros/image_frame");
-  UPROPERTY(EditAnywhere, Category = "Vision Component")
+  UPROPERTY(BlueprintReadWrite, Category = "Vision Component")
     FString ImageOpticalFrame = TEXT("/unreal_ros/image_optical_frame");
     
 protected:
