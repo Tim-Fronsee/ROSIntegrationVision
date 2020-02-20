@@ -38,13 +38,9 @@ public class ROSIntegrationVision : ModuleRules
     PrivateDependencyModuleNames.AddRange(
       new string[]
       {
-        "Core",
         "CoreUObject",
         "Engine",
         "RenderCore",
-        "Sockets",
-        "Networking",
-        "ROSIntegration"
         // ... add private dependencies that you statically link with here ...	
       }
     );
