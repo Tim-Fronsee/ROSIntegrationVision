@@ -33,21 +33,21 @@ public:
 	std::thread ThreadColor, ThreadDepth;
 };
 
-UVisionComponent::UVisionComponent() : 
-Width(960), 
-Height(540), 
-Framerate(1), 
+UVisionComponent::UVisionComponent() :
+Width(960),
+Height(540),
+Framerate(1),
 UseEngineFramerate(false),
-ServerPort(10000), 
-FrameTime(1.0f / Framerate), 
-TimePassed(0), 
+ServerPort(10000),
+FrameTime(1.0f / Framerate),
+TimePassed(0),
 ColorsUsed(0)
 {
     Priv = new PrivateData();
     FieldOfView = 90.0;
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = true;
-    
+
     auto owner = GetOwner();
     if (owner)
     {
@@ -69,6 +69,11 @@ ColorsUsed(0)
     else {
         UE_LOG(LogTemp, Warning, TEXT("No owner!"));
     }
+
+    CameraInfoPublisher = NewObject<UTopic>(UTopic::StaticClass());
+    DepthPublisher = NewObject<UTopic>(UTopic::StaticClass());
+    ImagePublisher = NewObject<UTopic>(UTopic::StaticClass());
+    TFPublisher = NewObject<UTopic>(UTopic::StaticClass());
 }
 
 UVisionComponent::~UVisionComponent()
@@ -91,7 +96,7 @@ void UVisionComponent::Pause(const bool _Pause)
 bool UVisionComponent::IsPaused() const
 {
     return Paused;
-}  
+}
 
 void UVisionComponent::InitializeComponent()
 {
@@ -128,27 +133,23 @@ void UVisionComponent::BeginPlay()
 	UROSIntegrationGameInstance* rosinst = Cast<UROSIntegrationGameInstance>(GetOwner()->GetGameInstance());
 	if (rosinst)
 	{
-		TFPublisher = NewObject<UTopic>(UTopic::StaticClass());
-		TFPublisher->Init(rosinst->ROSIntegrationCore, 
-                           TEXT("/tf"), 
-                           TEXT("tf2_msgs/TFMessage"));
+		TFPublisher->Init(rosinst->ROSIntegrationCore,
+                      TEXT("/tf"),
+                      TEXT("tf2_msgs/TFMessage"));
 
-		CameraInfoPublisher = NewObject<UTopic>(UTopic::StaticClass());
-		CameraInfoPublisher->Init(rosinst->ROSIntegrationCore, 
-                                   TEXT("/unreal_ros/camera_info"), 
-                                   TEXT("sensor_msgs/CameraInfo"));
+		CameraInfoPublisher->Init(rosinst->ROSIntegrationCore,
+                              TEXT("/unreal_ros/camera_info"),
+                              TEXT("sensor_msgs/CameraInfo"));
 		CameraInfoPublisher->Advertise();
 
-		ImagePublisher = NewObject<UTopic>(UTopic::StaticClass());
-		ImagePublisher->Init(rosinst->ROSIntegrationCore, 
-                              TEXT("/unreal_ros/image_color"), 
-                              TEXT("sensor_msgs/Image"));
+		ImagePublisher->Init(rosinst->ROSIntegrationCore,
+                         TEXT("/unreal_ros/image_color"),
+                         TEXT("sensor_msgs/Image"));
 		ImagePublisher->Advertise();
 
-		DepthPublisher = NewObject<UTopic>(UTopic::StaticClass());
-		DepthPublisher->Init(rosinst->ROSIntegrationCore, 
-                              TEXT("/unreal_ros/image_depth"), 
-                              TEXT("sensor_msgs/Image"));
+		DepthPublisher->Init(rosinst->ROSIntegrationCore,
+                         TEXT("/unreal_ros/image_depth"),
+                         TEXT("sensor_msgs/Image"));
 		DepthPublisher->Advertise();
 	}
 	else {
@@ -177,38 +178,39 @@ void UVisionComponent::TickComponent(float DeltaTime,
 	TimePassed -= FrameTime;
 	MEASURE_TIME("Tick");
 
-    auto owner = GetOwner();
+	auto owner = GetOwner();
 	owner->UpdateComponentTransforms();
 
 	FDateTime Now = FDateTime::UtcNow();
 	Priv->Buffer->HeaderWrite->TimestampCapture = Now.ToUnixTimestamp() * 1000000000 + Now.GetMillisecond() * 1000000;
 
-	FVector Translation = GetComponentLocation();
-	FQuat Rotation = GetComponentQuat();
-	// Convert to meters and ROS coordinate system
+	FVector Translation = GetRelativeLocation();
+	FQuat Quat = FQuat(GetRelativeRotation());
+
+	// Convert to meters and ROS coordinate system in relation to the owner's transform.
 	Priv->Buffer->HeaderWrite->Translation.X = Translation.X / 100.0f;
 	Priv->Buffer->HeaderWrite->Translation.Y = -Translation.Y / 100.0f;
 	Priv->Buffer->HeaderWrite->Translation.Z = Translation.Z / 100.0f;
-	Priv->Buffer->HeaderWrite->Rotation.X = -Rotation.X;
-	Priv->Buffer->HeaderWrite->Rotation.Y = Rotation.Y;
-	Priv->Buffer->HeaderWrite->Rotation.Z = -Rotation.Z;
-	Priv->Buffer->HeaderWrite->Rotation.W = Rotation.W;
+	Priv->Buffer->HeaderWrite->Rotation.X = -Quat.X;
+	Priv->Buffer->HeaderWrite->Rotation.Y = Quat.Y;
+	Priv->Buffer->HeaderWrite->Rotation.Z = -Quat.Z;
+	Priv->Buffer->HeaderWrite->Rotation.W = Quat.W;
 
 	// Start writing to buffer
 	Priv->Buffer->StartWriting(ObjectToColor, ObjectColors);
-        
+
 	// Read color image and notify processing thread
 	Priv->WaitColor.lock();
 	ReadImage(Color->TextureTarget, ImageColor);
 	Priv->WaitColor.unlock();
 	Priv->CVColor.notify_one();
-    
+
     // Read depth image.
     Priv->WaitDepth.lock();
     ReadImage(Depth->TextureTarget, ImageDepth);
     Priv->WaitDepth.unlock();
     Priv->CVDepth.notify_one();
-    
+
     // Close the buffer.
     Priv->Buffer->DoneWriting();
 
@@ -267,15 +269,7 @@ void UVisionComponent::TickComponent(float DeltaTime,
 
 	Priv->Buffer->DoneReading();
 
-	double x = Priv->Buffer->HeaderRead->Translation.X;
-	double y = Priv->Buffer->HeaderRead->Translation.Y;
-	double z = Priv->Buffer->HeaderRead->Translation.Z;
-	double rx = Priv->Buffer->HeaderRead->Rotation.X;
-	double ry = Priv->Buffer->HeaderRead->Rotation.Y;
-	double rz = Priv->Buffer->HeaderRead->Rotation.Z;
-	double rw = Priv->Buffer->HeaderRead->Rotation.W;
-
-	if (!DisableTFPublishing && TFPublisher) {
+	if (!DisableTFPublishing) {
     // Start advertising TF only if it has yet to advertise.
     if (TFPublisher && !TFPublisher->IsAdvertising())
     {
@@ -287,21 +281,21 @@ void UVisionComponent::TickComponent(float DeltaTime,
 		TransformImage.header.time = time;
 		TransformImage.header.frame_id = ParentLink;
 		TransformImage.child_frame_id = ImageFrame;
-		TransformImage.transform.translation.x = x;
-		TransformImage.transform.translation.y = y;
-		TransformImage.transform.translation.z = z;
-		TransformImage.transform.rotation.x = rx;
-		TransformImage.transform.rotation.y = ry;
-		TransformImage.transform.rotation.z = rz;
-		TransformImage.transform.rotation.w = rw;
+		TransformImage.transform.translation.x = Priv->Buffer->HeaderRead->Translation.X;
+		TransformImage.transform.translation.y = Priv->Buffer->HeaderRead->Translation.Y;
+		TransformImage.transform.translation.z = Priv->Buffer->HeaderRead->Translation.Z;
+		TransformImage.transform.rotation.x = Priv->Buffer->HeaderRead->Rotation.X;
+		TransformImage.transform.rotation.y = Priv->Buffer->HeaderRead->Rotation.Y;
+		TransformImage.transform.rotation.z = Priv->Buffer->HeaderRead->Rotation.Z;
+		TransformImage.transform.rotation.w = Priv->Buffer->HeaderRead->Rotation.W;
 
 		TFImageFrame->transforms.Add(TransformImage);
 
 		TFPublisher->Publish(TFImageFrame);
-		
-		// Publish optical frame
-		FRotator CameraLinkRotator(0.0, -90.0, 90.0);
-		FQuat CameraLinkQuaternion(CameraLinkRotator);
+
+		// Publish optical frame with a fixed joint connecting to the Image frame.
+		FRotator OpticalRotator(0.0, -90.0, 90.0);
+		FQuat OpticalQuat(OpticalRotator);
 
 		TSharedPtr<ROSMessages::tf2_msgs::TFMessage> TFOpticalFrame(new ROSMessages::tf2_msgs::TFMessage());
 		ROSMessages::geometry_msgs::TransformStamped TransformOptical;
@@ -309,13 +303,10 @@ void UVisionComponent::TickComponent(float DeltaTime,
 		TransformOptical.header.time = time;
 		TransformOptical.header.frame_id = ImageFrame;
 		TransformOptical.child_frame_id = ImageOpticalFrame;
-		TransformOptical.transform.translation.x = 0;
-		TransformOptical.transform.translation.y = 0;
-		TransformOptical.transform.translation.z = 0;
-		TransformOptical.transform.rotation.x = CameraLinkQuaternion.X;
-		TransformOptical.transform.rotation.y = CameraLinkQuaternion.Y;
-		TransformOptical.transform.rotation.z = CameraLinkQuaternion.Z;
-		TransformOptical.transform.rotation.w = CameraLinkQuaternion.W;
+		TransformOptical.transform.rotation.x = OpticalQuat.X;
+		TransformOptical.transform.rotation.y = OpticalQuat.Y;
+		TransformOptical.transform.rotation.z = OpticalQuat.Z;
+		TransformOptical.transform.rotation.w = OpticalQuat.W;
 
 		TFOpticalFrame->transforms.Add(TransformOptical);
 
@@ -347,68 +338,66 @@ void UVisionComponent::TickComponent(float DeltaTime,
 	const double P6 = K5;
 	const double P10 = 1;
 
-	if (CameraInfoPublisher) {
-		TSharedPtr<ROSMessages::sensor_msgs::CameraInfo> CamInfo(new ROSMessages::sensor_msgs::CameraInfo());
-		CamInfo->header.seq = 0;
-		CamInfo->header.time = time;
-		//CamInfo->header.frame_id =
-		CamInfo->height = Height;
-		CamInfo->width = Width;
-		CamInfo->distortion_model = TEXT("plumb_bob");
-		CamInfo->D[0] = 0;
-		CamInfo->D[1] = 0;
-		CamInfo->D[2] = 0;
-		CamInfo->D[3] = 0;
-		CamInfo->D[4] = 0;
+	TSharedPtr<ROSMessages::sensor_msgs::CameraInfo> CamInfo(new ROSMessages::sensor_msgs::CameraInfo());
+	CamInfo->header.seq = 0;
+	CamInfo->header.time = time;
+	//CamInfo->header.frame_id =
+	CamInfo->height = Height;
+	CamInfo->width = Width;
+	CamInfo->distortion_model = TEXT("plumb_bob");
+	CamInfo->D[0] = 0;
+	CamInfo->D[1] = 0;
+	CamInfo->D[2] = 0;
+	CamInfo->D[3] = 0;
+	CamInfo->D[4] = 0;
 
-		CamInfo->K[0] = K0;
-		CamInfo->K[1] = 0;
-		CamInfo->K[2] = K2;
-		CamInfo->K[3] = 0;
-		CamInfo->K[4] = K4;
-		CamInfo->K[5] = K5;
-		CamInfo->K[6] = 0;
-		CamInfo->K[7] = 0;
-		CamInfo->K[8] = K8;
+	CamInfo->K[0] = K0;
+	CamInfo->K[1] = 0;
+	CamInfo->K[2] = K2;
+	CamInfo->K[3] = 0;
+	CamInfo->K[4] = K4;
+	CamInfo->K[5] = K5;
+	CamInfo->K[6] = 0;
+	CamInfo->K[7] = 0;
+	CamInfo->K[8] = K8;
 
-		CamInfo->R[0] = 1;
-		CamInfo->R[1] = 0;
-		CamInfo->R[2] = 0;
-		CamInfo->R[3] = 0;
-		CamInfo->R[4] = 1;
-		CamInfo->R[5] = 0;
-		CamInfo->R[6] = 0;
-		CamInfo->R[7] = 0;
-		CamInfo->R[8] = 1;
+	CamInfo->R[0] = 1;
+	CamInfo->R[1] = 0;
+	CamInfo->R[2] = 0;
+	CamInfo->R[3] = 0;
+	CamInfo->R[4] = 1;
+	CamInfo->R[5] = 0;
+	CamInfo->R[6] = 0;
+	CamInfo->R[7] = 0;
+	CamInfo->R[8] = 1;
 
-		CamInfo->P[0] = P0;
-		CamInfo->P[1] = 0;
-		CamInfo->P[2] = P2;
-		CamInfo->P[3] = 0;
-		CamInfo->P[4] = 0;
-		CamInfo->P[5] = P5;
-		CamInfo->P[6] = P6;
-		CamInfo->P[7] = 0;
-		CamInfo->P[8] = 0;
-		CamInfo->P[9] = 0;
-		CamInfo->P[10] = P10;
-		CamInfo->P[11] = 0;
+	CamInfo->P[0] = P0;
+	CamInfo->P[1] = 0;
+	CamInfo->P[2] = P2;
+	CamInfo->P[3] = 0;
+	CamInfo->P[4] = 0;
+	CamInfo->P[5] = P5;
+	CamInfo->P[6] = P6;
+	CamInfo->P[7] = 0;
+	CamInfo->P[8] = 0;
+	CamInfo->P[9] = 0;
+	CamInfo->P[10] = P10;
+	CamInfo->P[11] = 0;
 
-		CamInfo->binning_x = 0;
-		CamInfo->binning_y = 0;
+	CamInfo->binning_x = 0;
+	CamInfo->binning_y = 0;
 
-		CamInfo->roi.x_offset = 0;
-		CamInfo->roi.y_offset = 0;
-		CamInfo->roi.height = 0;
-		CamInfo->roi.width = 0;
-		CamInfo->roi.do_rectify = false;
+	CamInfo->roi.x_offset = 0;
+	CamInfo->roi.y_offset = 0;
+	CamInfo->roi.height = 0;
+	CamInfo->roi.width = 0;
+	CamInfo->roi.do_rectify = false;
 
-		CameraInfoPublisher->Publish(CamInfo);
-	}
+	CameraInfoPublisher->Publish(CamInfo);
 
 	// Clean up
 	delete[] TargetDepthBuf;
-}            
+}
 
 void UVisionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -421,7 +410,7 @@ void UVisionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
     Priv->ThreadColor.join();
     Priv->ThreadDepth.join();
-}         
+}
 
 void UVisionComponent::ShowFlagsBasicSetting(FEngineShowFlags &ShowFlags) const
 {
@@ -690,4 +679,4 @@ void UVisionComponent::convertDepth(const uint16_t *in, __m128 *out) const
 		*out = _mm_cvtph_ps(_mm_set_epi16(
         0, 0, 0, 0, *(in + 3), *(in + 2), *(in + 1), *(in + 0))) / 100;
 	}
-}       
+}
