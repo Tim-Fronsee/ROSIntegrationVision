@@ -116,9 +116,6 @@ void UVisionComponent::BeginPlay()
 
 	AspectRatio = Width / (float)Height;
 
-	// Setting flags for each camera
-	ShowFlagsLit(Color->ShowFlags);
-
 	// Creating double buffer and setting the pointer of the server object
 	Priv->Buffer = TSharedPtr<PacketBuffer>(new PacketBuffer(Width, Height, FieldOfView));
 
@@ -410,50 +407,6 @@ void UVisionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
     Priv->ThreadColor.join();
     Priv->ThreadDepth.join();
-}
-
-void UVisionComponent::ShowFlagsBasicSetting(FEngineShowFlags &ShowFlags) const
-{
-	ShowFlags = FEngineShowFlags(EShowFlagInitMode::ESFIM_All0);
-	ShowFlags.SetRendering(true);
-	ShowFlags.SetStaticMeshes(true);
-	ShowFlags.SetLandscape(true);
-	ShowFlags.SetInstancedFoliage(true);
-	ShowFlags.SetInstancedGrass(true);
-	ShowFlags.SetInstancedStaticMeshes(true);
-}
-
-void UVisionComponent::ShowFlagsLit(FEngineShowFlags &ShowFlags) const
-{
-	ShowFlagsBasicSetting(ShowFlags);
-	ShowFlags = FEngineShowFlags(EShowFlagInitMode::ESFIM_Game);
-	ApplyViewMode(VMI_Lit, true, ShowFlags);
-	ShowFlags.SetMaterials(true);
-	ShowFlags.SetLighting(true);
-	ShowFlags.SetPostProcessing(true);
-	// ToneMapper needs to be enabled, otherwise the screen will be very dark
-	ShowFlags.SetTonemapper(true);
-	// TemporalAA needs to be disabled, otherwise the previous frame might contaminate current frame.
-	// Check: https://answers.unrealengine.com/questions/436060/low-quality-screenshot-after-setting-the-actor-pos.html for detail
-	ShowFlags.SetTemporalAA(false);
-	ShowFlags.SetAntiAliasing(true);
-	ShowFlags.SetEyeAdaptation(false); // Eye adaption is a slow temporal procedure, not useful for image capture
-}
-
-void UVisionComponent::ShowFlagsVertexColor(FEngineShowFlags &ShowFlags) const
-{
-	ShowFlagsLit(ShowFlags);
-
-	// From MeshPaintEdMode.cpp:2942
-	ShowFlags.SetMaterials(false);
-	ShowFlags.SetLighting(false);
-	ShowFlags.SetBSPTriangles(true);
-	ShowFlags.SetVertexColors(true);
-	ShowFlags.SetPostProcessing(false);
-	ShowFlags.SetHMDDistortion(false);
-	ShowFlags.SetTonemapper(false); // This won't take effect here
-
-	GVertexColorViewMode = EVertexColorViewMode::Color;
 }
 
 void UVisionComponent::ReadImage(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const

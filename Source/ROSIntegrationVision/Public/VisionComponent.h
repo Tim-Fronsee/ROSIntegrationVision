@@ -83,9 +83,6 @@ private:
   uint32 ColorsUsed;
   bool Running, Paused;
 
-  void ShowFlagsBasicSetting(FEngineShowFlags &ShowFlags) const;
-  void ShowFlagsLit(FEngineShowFlags &ShowFlags) const;
-  void ShowFlagsVertexColor(FEngineShowFlags &ShowFlags) const;
   void ReadImage(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const;
   void ReadImageCompressed(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const;
   void ToColorImage(const TArray<FFloat16Color> &ImageData, uint8 *Bytes) const;
