@@ -56,6 +56,7 @@ ColorsUsed(0)
         Color->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
         Color->TextureTarget = CreateDefaultSubobject<UTextureRenderTarget2D>(TEXT("ColorTarget"));
         Color->TextureTarget->InitAutoFormat(Width, Height);
+        Color->TextureTarget->TargetGamma = 1.4f;
         Color->FOVAngle = FieldOfView;
 
         Depth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("DepthCapture"));
