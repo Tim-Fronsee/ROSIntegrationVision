@@ -35,6 +35,7 @@ public:
 };
 
 UVisionComponent::UVisionComponent() :
+Format(EVisionFormat::Color),
 Width(960),
 Height(540),
 Framerate(1),
@@ -112,6 +113,8 @@ void UVisionComponent::BeginPlay()
   Super::BeginPlay();
     // Initializing buffers for reading images from the GPU
 	ImageColor.AddUninitialized(Width * Height);
+  ImageLinearColor.AddUninitialized(Width * Height);
+  ImageFloat16Color.AddUninitialized(Width * Height);
 	ImageDepth.AddUninitialized(Width * Height);
 
 	// Reinit renderer
@@ -202,18 +205,32 @@ void UVisionComponent::TickComponent(float DeltaTime,
 
 	// Read color image and notify processing thread
 	Priv->WaitColor.lock();
-	ReadImage(Color->TextureTarget, ImageColor);
+
+  // Read the image data based on the desired format.
+  switch (Format)
+  {
+    case EVisionFormat::LinearColor:
+  	  ReadLinearColor(Color->TextureTarget, ImageLinearColor);
+      break;
+    case EVisionFormat::Float16Color:
+      ReadFloat16Color(Color->TextureTarget, ImageFloat16Color);
+      break;
+    default:
+      ReadColor(Color->TextureTarget, ImageColor);
+      break;
+  }
+
 	Priv->WaitColor.unlock();
 	Priv->CVColor.notify_one();
 
-    // Read depth image.
-    Priv->WaitDepth.lock();
-    ReadImage(Depth->TextureTarget, ImageDepth);
-    Priv->WaitDepth.unlock();
-    Priv->CVDepth.notify_one();
+  // Read depth image.
+  Priv->WaitDepth.lock();
+  ReadFloat16Color(Depth->TextureTarget, ImageDepth);
+  Priv->WaitDepth.unlock();
+  Priv->CVDepth.notify_one();
 
-    // Close the buffer.
-    Priv->Buffer->DoneWriting();
+  // Close the buffer.
+  Priv->Buffer->DoneWriting();
 
 	Priv->Buffer->StartReading();
 	uint32_t xSize = Priv->Buffer->HeaderRead->Size;
@@ -233,7 +250,6 @@ void UVisionComponent::TickComponent(float DeltaTime,
 
 	const uint32_t ColorImageSize = Width * Height * 3;
 	convertDepth((uint16_t *)DepthPtr, (__m128*)TargetDepthBuf);
-	// convertDepth((uint16_t *)packet.pDepth, (__m128*)&msgDepth->data[0]);
 
 	UE_LOG(LogTemp, Verbose, TEXT("Buffer Offsets: %d %d %d"), OffsetColor, OffsetDepth, OffsetObject);
 
@@ -413,7 +429,19 @@ void UVisionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Priv->ThreadDepth.join();
 }
 
-void UVisionComponent::ReadImage(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const
+void UVisionComponent::ReadColor(UTextureRenderTarget2D *RenderTarget, TArray<FColor> &ImageData) const
+{
+	FTextureRenderTargetResource *RenderTargetResource = RenderTarget->GameThread_GetRenderTargetResource();
+	RenderTargetResource->ReadPixels(ImageData);
+}
+
+void UVisionComponent::ReadLinearColor(UTextureRenderTarget2D *RenderTarget, TArray<FLinearColor> &ImageData) const
+{
+	FTextureRenderTargetResource *RenderTargetResource = RenderTarget->GameThread_GetRenderTargetResource();
+	RenderTargetResource->ReadLinearColorPixels(ImageData);
+}
+
+void UVisionComponent::ReadFloat16Color(UTextureRenderTarget2D *RenderTarget, TArray<FFloat16Color> &ImageData) const
 {
 	FTextureRenderTargetResource *RenderTargetResource = RenderTarget->GameThread_GetRenderTargetResource();
 	RenderTargetResource->ReadFloat16Pixels(ImageData);
@@ -431,7 +459,37 @@ void UVisionComponent::ReadImageCompressed(UTextureRenderTarget2D *RenderTarget,
 	const TArray<uint8>& ImgData = ImageWrapper->GetCompressed();
 }
 
-void UVisionComponent::ToColorImage(const TArray<FFloat16Color> &ImageData, uint8 *Bytes) const
+void UVisionComponent::ColorToBytes(const TArray<FColor> &ImageData, uint8 *Bytes) const
+{
+	const FColor *itI = ImageData.GetData();
+	uint8_t *itO = Bytes;
+
+	// Converts Float colors to bytes
+	for (size_t i = 0; i < ImageData.Num(); ++i, ++itI, ++itO)
+	{
+		*itO = ProcessChannel(itI->B);
+		*++itO = ProcessChannel(itI->G);
+		*++itO = ProcessChannel(itI->R);
+	}
+	return;
+}
+
+void UVisionComponent::LinearColorToBytes(const TArray<FLinearColor> &ImageData, uint8 *Bytes) const
+{
+	const FLinearColor *itI = ImageData.GetData();
+	uint8_t *itO = Bytes;
+
+	// Converts Float colors to bytes
+	for (size_t i = 0; i < ImageData.Num(); ++i, ++itI, ++itO)
+	{
+		*itO = ProcessChannel(itI->B);
+		*++itO = ProcessChannel(itI->G);
+		*++itO = ProcessChannel(itI->R);
+	}
+	return;
+}
+
+void UVisionComponent::Float16ColorToBytes(const TArray<FFloat16Color> &ImageData, uint8 *Bytes) const
 {
 	const FFloat16Color *itI = ImageData.GetData();
 	uint8_t *itO = Bytes;
@@ -439,14 +497,38 @@ void UVisionComponent::ToColorImage(const TArray<FFloat16Color> &ImageData, uint
 	// Converts Float colors to bytes
 	for (size_t i = 0; i < ImageData.Num(); ++i, ++itI, ++itO)
 	{
-		*itO = Float16ToBytes(itI->B);
-		*++itO = Float16ToBytes(itI->G);
-		*++itO = Float16ToBytes(itI->R);
+		*itO = ProcessChannel(itI->B);
+		*++itO = ProcessChannel(itI->G);
+		*++itO = ProcessChannel(itI->R);
 	}
 	return;
 }
 
-uint8_t UVisionComponent::Float16ToBytes(const FFloat16 &channel) const
+uint8_t UVisionComponent::ProcessChannel(const uint8 &channel) const
+{
+  // Apply gamma correction and brightness adjustments to the channel.
+  float out = (FGenericPlatformMath::Pow(
+    channel / 255.f, 1 / GammaCorrection) * 255.f);
+  out += Contrast * (out - 128) + 128 + Brightness;
+  // Clamp to range [0, 255]
+  if (out > 255.f) out = 255.f;
+  else if (out < 0.f) out = 0.f;
+  return (uint8_t) std::round(out);
+}
+
+uint8_t UVisionComponent::ProcessChannel(const float &channel) const
+{
+  // Apply gamma correction and brightness adjustments to the channel.
+  float out = (FGenericPlatformMath::Pow(
+    channel / 255.f, 1 / GammaCorrection) * 255.f) * 255.f;
+  out += Contrast * (out - 128) + 128 + Brightness;
+  // Clamp to range [0, 255]
+  if (out > 255.f) out = 255.f;
+  else if (out < 0.f) out = 0.f;
+  return (uint8_t) std::round(out);
+}
+
+uint8_t UVisionComponent::ProcessChannel(const FFloat16 &channel) const
 {
   // Apply gamma correction and brightness adjustments to the channel.
   float out = (FGenericPlatformMath::Pow(
@@ -622,7 +704,19 @@ void UVisionComponent::ProcessColor()
 	{
 		std::unique_lock<std::mutex> WaitLock(Priv->WaitColor);
 		Priv->CVColor.wait(WaitLock);
-		ToColorImage(ImageColor, Priv->Buffer->Color);
+    // Process the image bytes based on the current format.
+    switch (Format)
+    {
+      case EVisionFormat::LinearColor:
+        LinearColorToBytes(ImageLinearColor, Priv->Buffer->Color);
+        break;
+      case EVisionFormat::Float16Color:
+        Float16ColorToBytes(ImageFloat16Color, Priv->Buffer->Color);
+        break;
+      default:
+        ColorToBytes(ImageColor, Priv->Buffer->Color);
+        break;
+    }
 		Priv->CVColor.notify_one();
 	}
 }
