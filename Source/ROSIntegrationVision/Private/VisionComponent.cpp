@@ -14,6 +14,7 @@
 #include "tf2_msgs/TFMessage.h"
 
 #include "EngineUtils.h"
+#include "GenericPlatform/GenericPlatformMath.h"
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "UObject/ConstructorHelpers.h"
@@ -39,6 +40,8 @@ Height(540),
 Framerate(1),
 UseEngineFramerate(false),
 ServerPort(10000),
+GammaCorrection(1.0f),
+Brightness(0.f),
 FrameTime(1.0f / Framerate),
 TimePassed(0),
 ColorsUsed(0)
@@ -56,7 +59,6 @@ ColorsUsed(0)
         Color->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
         Color->TextureTarget = CreateDefaultSubobject<UTextureRenderTarget2D>(TEXT("ColorTarget"));
         Color->TextureTarget->InitAutoFormat(Width, Height);
-        Color->TextureTarget->TargetGamma = 1.4f;
         Color->FOVAngle = FieldOfView;
 
         Depth = CreateDefaultSubobject<USceneCaptureComponent2D>(TEXT("DepthCapture"));
@@ -436,11 +438,22 @@ void UVisionComponent::ToColorImage(const TArray<FFloat16Color> &ImageData, uint
 	// Converts Float colors to bytes
 	for (size_t i = 0; i < ImageData.Num(); ++i, ++itI, ++itO)
 	{
-		*itO = (uint8_t)std::round((float)itI->B * 255.f);
-		*++itO = (uint8_t)std::round((float)itI->G * 255.f);
-		*++itO = (uint8_t)std::round((float)itI->R * 255.f);
+		*itO = Float16ToBytes(itI->B);
+		*++itO = Float16ToBytes(itI->G);
+		*++itO = Float16ToBytes(itI->R);
 	}
 	return;
+}
+
+uint8_t UVisionComponent::Float16ToBytes(const FFloat16 &channel) const
+{
+  // Apply gamma correction and brightness adjustments to the channel.
+  float out = (FGenericPlatformMath::Pow(
+    channel / 255.f, 1 / GammaCorrection) * 255.f) * 255.f;
+  out += Brightness;
+  // Remove any distortions.
+  if (out > 255.f) out = 255.f;
+  return (uint8_t) std::round(out);
 }
 
 void UVisionComponent::ToDepthImage(const TArray<FFloat16Color> &ImageData, uint8 *Bytes) const

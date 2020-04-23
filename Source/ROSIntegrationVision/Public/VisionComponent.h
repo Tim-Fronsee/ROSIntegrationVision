@@ -36,6 +36,12 @@ public:
     bool UseEngineFramerate;
   UPROPERTY(EditAnywhere, Category = "Vision Component")
     int32 ServerPort;
+  // Used with the color capture to apply a gamma adjustment.
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+    float GammaCorrection;
+  // Used with the color capture to apply a brightness adjustment.
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+    float Brightness;
 
   // The cameras for color, depth and objects;
   UPROPERTY(EditAnywhere, Category = "Vision Component")
@@ -93,6 +99,7 @@ private:
   bool ColorAllObjects();
   void ProcessColor();
   void ProcessDepth();
+  uint8_t Float16ToBytes(const FFloat16 &channel) const;
 
   // in must hold Width*Height*2(float) Bytes
   void convertDepth(const uint16_t *in, __m128 *out) const;
