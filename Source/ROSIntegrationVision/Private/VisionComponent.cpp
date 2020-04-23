@@ -42,6 +42,7 @@ UseEngineFramerate(false),
 ServerPort(10000),
 GammaCorrection(1.0f),
 Brightness(0.f),
+Contrast(1.f),
 FrameTime(1.0f / Framerate),
 TimePassed(0),
 ColorsUsed(0)
@@ -450,9 +451,10 @@ uint8_t UVisionComponent::Float16ToBytes(const FFloat16 &channel) const
   // Apply gamma correction and brightness adjustments to the channel.
   float out = (FGenericPlatformMath::Pow(
     channel / 255.f, 1 / GammaCorrection) * 255.f) * 255.f;
-  out += Brightness;
-  // Remove any distortions.
+  out += Contrast * (out - 128) + 128 + Brightness;
+  // Clamp to range [0, 255]
   if (out > 255.f) out = 255.f;
+  else if (out < 0.f) out = 0.f;
   return (uint8_t) std::round(out);
 }
 

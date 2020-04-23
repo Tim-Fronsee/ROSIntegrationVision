@@ -42,6 +42,9 @@ public:
   // Used with the color capture to apply a brightness adjustment.
   UPROPERTY(EditAnywhere, Category = "Vision Component")
     float Brightness;
+  // Used with the color capture to apply a contrast adjustment.
+  UPROPERTY(EditAnywhere, Category = "Vision Component")
+    float Contrast;
 
   // The cameras for color, depth and objects;
   UPROPERTY(EditAnywhere, Category = "Vision Component")
